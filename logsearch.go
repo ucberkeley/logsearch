@@ -120,7 +120,7 @@ var conf Config
 // ~/.logsearch_profile configuration
 func init() {
 	// Setup some basic configs
-	conf.UrlBase = "http://localhost:9200""
+	conf.UrlBase = "http://localhost:9200"
 	conf.NumLogs = 100
 	conf.FromTime = "now-30m"
 	conf.UntilTime = "now"
