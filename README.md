@@ -21,6 +21,8 @@ __Get usage info__
 
     logsearch -h
     Usage of logsearch:
+      -bundle string
+            bundle.name to match
       -config string
             Location of TOML formatted configuration file https://github.com/toml-lang/toml
             NOTE: setting non-default configfile override comflags
@@ -28,7 +30,7 @@ __Get usage info__
       -context string
             camel.contextId to match
       -correlation string
-    	    camel.correlationID to match
+            camel.correlationID to match
       -count
             Return only a count of the number of matches
       -debug
@@ -39,22 +41,26 @@ __Get usage info__
             Time specification for starting time of the search
             https://www.elastic.co/guide/en/elasticsearch/reference/current/mapping-date-format.html
             (default "now-30m")
+      -logger string
+            logger_name to match
       -message string
             Match against the main log message
       -numlogs int
             Number of lines of matching logs to return at a time (default 100)
       -offset int
             Offset into total matching logs to start
+      -password string
+            Password for basic auth (default "gimmedata,now!")
       -stack string
             stack_trace to match
       -uat
             Search among the UAT logs for matches
       -until string
             Time specification for ending time of search (default "now")
+      -url string
+            Base URL for the elasticsearch server (default "http://127.0.0.1:9200/")
       -username string
             Enable basic auth by setting username (default "analytics")
-      -password string
-            Password for basic auth
 
 __Get a count of the number of prod ESB errors in the last 30 minutes (count is in the "count" attribute)__
 
