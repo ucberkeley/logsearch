@@ -9,7 +9,7 @@ package main
 // Licensed under the Educational Community License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 //
-//	You may obtain a copy of the License at: http://opensource.org/licenses/ECL-2.0
+// You may obtain a copy of the License at: http://opensource.org/licenses/ECL-2.0
 //
 // Unless required by applicable law or agreed to in writing,
 // software distributed under the License is distributed on an "AS IS"
@@ -49,6 +49,8 @@ type Config struct {
 	CorrelationID string   // match for the camel.correlationId
 	ContextID     string   // match for the camel.contextId
 	StackTrace    string   // match for stack_track field
+	BundleName    string   // match for bundle.name field
+	Logger        string   // match for logger_name field
 	Message       string   // match for the message field
 	ExtTerms      []string // array with extra search terms appended to end of query (include AND and OR explicitly)
 }
@@ -65,7 +67,7 @@ const reqTemplate = `
           "should": [
             {
               "query_string": {
-                "query": "type:logstash_tcp AND app_homedir:\"/home/app_smx{{ if .Uat}}_sg0{{end}}/jboss-fuse-6.1.0.redhat-379\"{{if .Errors}} AND level:\"ERROR\"{{end}}{{if .CorrelationID}} AND camel.correlationId:\"{{.CorrelationID}}\"{{end}}{{if .ContextID}} AND camel.contextId:\"{{.ContextID}}\"{{end}}{{if .StackTrace}} AND stack_trace:\"{{.StackTrace}}\"{{end}}{{if .Message}} AND message:\"{{.Message}}\"{{end}}{{if .ExtTerms}} AND{{end}}{{range .ExtTerms}} {{.}}{{end}}"
+                "query": "type:logstash_tcp AND app_homedir:\"/home/app_smx{{ if .Uat}}_sg0{{end}}/jboss-fuse-6.1.0.redhat-379\"{{if .Errors}} AND level:\"ERROR\"{{end}}{{if .CorrelationID}} AND camel.correlationId:\"{{.CorrelationID}}\"{{end}}{{if .ContextID}} AND camel.contextId:\"{{.ContextID}}\"{{end}}{{if .StackTrace}} AND stack_trace:\"{{.StackTrace}}\"{{end}}{{if .Logger}} AND logger_name:\"{{.Logger}}\"{{end}}{{if .BundleName}} AND bundle.name:\"{{.BundleName}}\"{{end}}{{if .Message}} AND message:\"{{.Message}}\"{{end}}{{if .ExtTerms}} AND{{end}}{{range .ExtTerms}} {{.}}{{end}}"
               }
             }
           ]
@@ -120,7 +122,7 @@ var conf Config
 // ~/.logsearch_profile configuration
 func init() {
 	// Setup some basic configs
-	conf.UrlBase = "http://localhost:9200"
+	conf.UrlBase = "http://127.0.0.1:9200/"
 	conf.NumLogs = 100
 	conf.FromTime = "now-30m"
 	conf.UntilTime = "now"
@@ -153,7 +155,10 @@ func init() {
 	flag.StringVar(&conf.CorrelationID, "correlation", "", "camel.correlationID to match")
 	flag.StringVar(&conf.ContextID, "context", "", "camel.contextId to match")
 	flag.StringVar(&conf.StackTrace, "stack", "", "stack_trace to match")
+	flag.StringVar(&conf.BundleName, "bundle", "", "bundle.name to match")
+	flag.StringVar(&conf.Logger, "logger", "", "logger_name to match")
 	flag.StringVar(&conf.Message, "message", "", "Match against the main log message")
+	flag.StringVar(&conf.UrlBase, "url", conf.UrlBase, "Base URL for the elasticsearch server")
 	flag.StringVar(&conf.Username, "username", conf.Username, "Enable basic auth by setting username")
 	flag.StringVar(&conf.Password, "password", conf.Password, "Password for basic auth")
 	flag.StringVar(&configFile,"config", configFileDef, "Location of TOML formatted configuration file https://github.com/toml-lang/toml\n\tNOTE: setting non-default configfile override comflags\n\t")
