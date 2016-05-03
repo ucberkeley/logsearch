@@ -2,20 +2,8 @@ package main
 //
 // Client that performs queries against ElasticSearch backend, searching among
 // records inserted using the Logstash-Logback encoder
-// Steve Chan 2/16/2016
-// sychan@berkeley.edu
+// sychan 2/16/2016
 //
-// Copyright 2016, Regents of the University of California
-// Licensed under the Educational Community License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-//
-// You may obtain a copy of the License at: http://opensource.org/licenses/ECL-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an "AS IS"
-// BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing
-// permissions and limitations under the License.
 
 import (
 	"fmt"
@@ -51,13 +39,28 @@ type Config struct {
 	StackTrace    string   // match for stack_track field
 	BundleName    string   // match for bundle.name field
 	Logger        string   // match for logger_name field
-	Message       string   // match for the message field
+	Message       string   // match for the message/@message field
+	Uri           string   // match for the fields_requested_uri field in jetty logs
+	Status        int      // match for the fields_status_code field - http return code  in jetty logs
+	Endpoint      string   // match for the endpoint field in jetty logs- API endpoint
+	Logsource     string   // match for the logsource field - fqdn of the host generating log
 	ExtTerms      []string // array with extra search terms appended to end of query (include AND and OR explicitly)
+	Jetty         bool     // query for jetty logs instead of esb
+	Nginx         bool     // query for nginx logs instead of esb or jetty
+	AppId         string   // match app_id of api central
+	ClientIP      string   // match for client IP address
 }
 
 // Go template for a query against ElasticSearch, originally based on sample query from
 // Kibana dashboard
+
 const reqTemplate = `
+{{- define "nginx_query"}}program:nginx{{if .AppId}} AND app_id:{{.AppId}}{{end}}{{if .Uri}} AND uri_path:\"{{.Uri}}\"{{end}}{{if .Status}} AND status:{{.Status}}{{end}}{{if .Endpoint}} AND endpoint:\"{{.Endpoint}}\"{{end}}{{if .ClientIP}} AND remote_addr:{{.ClientIP}}{{end}}{{if .Message}} AND message:\"{{.Message}}\"{{end}}{{end}}
+
+{{- define "jetty_query"}}type:logstash_tcp AND _exists_:\"@fields_requested_url\"{{if .Uri}} AND @fields_requested_uri:\"{{.Uri}}\"{{end}}{{if .Status}} AND @fields_status_code:{{.Status}}{{end}}{{if .Endpoint}} AND endpoint:\"{{.Endpoint}}\"{{end}}{{if .ClientIP}} AND @fields_remote_host:{{.ClientIP}}{{end}}{{if .Message}} AND @message:\"{{.Message}}\"{{end}}{{end}}
+
+{{- define "esb_query"}}program:fuseesb AND app_homedir:\"/home/app_smx{{ if .Uat}}_sg0{{end}}/jboss-fuse-6.1.0.redhat-379\"{{if .Errors}} AND level:\"ERROR\"{{end}}{{if .CorrelationID}} AND camel_correlationId:\"{{.CorrelationID}}\"{{end}}{{if .ContextID}} AND camel_contextId:\"{{.ContextID}}\"{{end}}{{if .StackTrace}} AND stack_trace:\"{{.StackTrace}}\"{{end}}{{if .Logger}} AND logger_name:\"{{.Logger}}\"{{end}}{{if .BundleName}} AND bundle_name:\"{{.BundleName}}\"{{end}}{{if .Message}} AND message:\"{{.Message}}\"{{end}}{{end -}}
+
 {
 {{ if not .Count }}  "fields" : [ "_source" ],{{end}}
   "query": {
@@ -67,7 +70,14 @@ const reqTemplate = `
           "should": [
             {
               "query_string": {
-                "query": "type:logstash_tcp AND app_homedir:\"/home/app_smx{{ if .Uat}}_sg0{{end}}/jboss-fuse-6.1.0.redhat-379\"{{if .Errors}} AND level:\"ERROR\"{{end}}{{if .CorrelationID}} AND camel.correlationId:\"{{.CorrelationID}}\"{{end}}{{if .ContextID}} AND camel.contextId:\"{{.ContextID}}\"{{end}}{{if .StackTrace}} AND stack_trace:\"{{.StackTrace}}\"{{end}}{{if .Logger}} AND logger_name:\"{{.Logger}}\"{{end}}{{if .BundleName}} AND bundle.name:\"{{.BundleName}}\"{{end}}{{if .Message}} AND message:\"{{.Message}}\"{{end}}{{if .ExtTerms}} AND{{end}}{{range .ExtTerms}} {{.}}{{end}}"
+                "query": "{{ if .Nginx -}}
+                              {{ template "nginx_query" . -}}
+                          {{ else if .Jetty -}}
+                              {{ template "jetty_query" . -}}
+                          {{ else -}}
+                              {{ template "esb_query" . -}}
+                          {{ end -}}
+                          {{if .Logsource}} AND logsource:\"{{.Logsource}}\"{{end}}{{if .ExtTerms}} AND{{end}}{{range .ExtTerms}} {{.}}{{end}}"
               }
             }
           ]
@@ -122,7 +132,7 @@ var conf Config
 // ~/.logsearch_profile configuration
 func init() {
 	// Setup some basic configs
-	conf.UrlBase = "http://127.0.0.1:9200/"
+	conf.UrlBase = "https://api-devops-prod-02.ist.berkeley.edu/elasticsearch/"
 	conf.NumLogs = 100
 	conf.FromTime = "now-30m"
 	conf.UntilTime = "now"
@@ -147,17 +157,25 @@ func init() {
 	flag.IntVar(&conf.NumLogs, "numlogs", conf.NumLogs, "Number of lines of matching logs to return at a time")
 	flag.IntVar(&conf.Offset, "offset", 0, "Offset into total matching logs to start")
 	flag.BoolVar(&conf.Count, "count", false, "Return only a count of the number of matches")
-	flag.BoolVar(&conf.Errors, "errors", false, "Return only error logs that match")
+	flag.BoolVar(&conf.Errors, "errors", false, "Return only ESB error logs that match")
 	flag.BoolVar(&debug, "debug", false, "Output debug information")
-	flag.BoolVar(&conf.Uat, "uat", false, "Search among the UAT logs for matches")
+	flag.BoolVar(&conf.Jetty, "jetty", false, "Query for jetty instead of ESB logs")
+	flag.BoolVar(&conf.Nginx, "nginx", false, "Query for nginx instead of ESB or Jetty logs")
+	flag.StringVar(&conf.AppId, "app_id", "", "filter by API Central app_id in nginx logs")
+	flag.StringVar(&conf.ClientIP, "client_ip", "", "Client IP address making HTTP - only useful for -nginx queries")
+	flag.BoolVar(&conf.Uat, "uat", false, "Search among the esb UAT logs for matches - only available for esb logs")
 	flag.StringVar(&conf.FromTime, "from", conf.FromTime, "Time specification for starting time of the search\n\thttps://www.elastic.co/guide/en/elasticsearch/reference/current/mapping-date-format.html\n\t")
 	flag.StringVar(&conf.UntilTime, "until", conf.UntilTime, "Time specification for ending time of search")
-	flag.StringVar(&conf.CorrelationID, "correlation", "", "camel.correlationID to match")
-	flag.StringVar(&conf.ContextID, "context", "", "camel.contextId to match")
-	flag.StringVar(&conf.StackTrace, "stack", "", "stack_trace to match")
-	flag.StringVar(&conf.BundleName, "bundle", "", "bundle.name to match")
-	flag.StringVar(&conf.Logger, "logger", "", "logger_name to match")
-	flag.StringVar(&conf.Message, "message", "", "Match against the main log message")
+	flag.StringVar(&conf.CorrelationID, "correlation", "", "ESB camel_correlationID to match")
+	flag.StringVar(&conf.ContextID, "context", "", "ESB camel_contextId to match")
+	flag.StringVar(&conf.StackTrace, "stack", "", "ESB stack_trace to match")
+	flag.StringVar(&conf.BundleName, "bundle", "", "ESB bundle_name to match")
+	flag.StringVar(&conf.Logger, "logger", "", "ESB logger_name to match")
+	flag.StringVar(&conf.Uri, "uri", "", "jetty/nginx uri to match")
+	flag.IntVar(&conf.Status, "status", 0, "jetty/nginx HTTP Return Status code to match")
+	flag.StringVar(&conf.Endpoint, "endpoint", "", "jetty/nginx API endpoint to match ( warning: imprecise )")
+	flag.StringVar(&conf.Logsource, "logsource", "", "Server hostname to match against")
+	flag.StringVar(&conf.Message, "message", "", "Match against the main log message/original access log message")
 	flag.StringVar(&conf.UrlBase, "url", conf.UrlBase, "Base URL for the elasticsearch server")
 	flag.StringVar(&conf.Username, "username", conf.Username, "Enable basic auth by setting username")
 	flag.StringVar(&conf.Password, "password", conf.Password, "Password for basic auth")
