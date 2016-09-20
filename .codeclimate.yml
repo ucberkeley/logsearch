@@ -1,0 +1,11 @@
+---
+engines:
+  fixme:
+    enabled: true
+  golint:
+    enabled: true
+    config:
+      min_confidence: 0.1
+ratings:
+  paths: []
+exclude_paths: []
